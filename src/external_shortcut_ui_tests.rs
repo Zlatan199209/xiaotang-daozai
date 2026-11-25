@@ -120,3 +120,11 @@ fn external_entries_leave_messenger_unread_untouched(){
     let external=entry(&h,4242);h.hover(external.center(),0.3);h.click(external.center());
     assert_eq!(focus_requests(&h),[4242]);
 }
+
+#[test]
+fn focus_requests_can_also_arrive_at_the_end_of_the_body(){
+    let (body,focus)=crate::system::body_focus("Claude Code · 执行完成 · 16:00:00 · daozai-focus:4242:Claude Code");
+    assert_eq!(focus,Some((4242,"Claude Code".into())));assert_eq!(body,"Claude Code · 执行完成 · 16:00:00");
+    let (body,focus)=crate::system::body_focus("没有请求的正文");
+    assert_eq!((body.as_str(),focus),("没有请求的正文",None));
+}

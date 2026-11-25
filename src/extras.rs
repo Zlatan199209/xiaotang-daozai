@@ -432,7 +432,7 @@ impl App {
         before!=self.external_targets.len()
     }
     /// 清掉窗口已不存在的入口。
-    pub(crate) fn retain_external_targets(&mut self,alive:impl FnMut(isize)->bool){self.external_targets.retain(|target|alive(target.window));}
+    pub(crate) fn retain_external_targets(&mut self,mut alive:impl FnMut(isize)->bool){self.external_targets.retain(|target|alive(target.window));}
     pub fn reveal_messenger_notice(&mut self,unread:crate::app::Unread){
         if !unread.source.adapter().dismiss_unread || !self.pending_messengers.contains(&unread){return;}
         let body=if unread.pid==0{"消息账号暂无法确认"}else{"暂时无法打开对应窗口"};

@@ -596,9 +596,22 @@ pub(crate) fn parse_focus(launch:&str)->Option<(isize,String)>{
     Some((window,if name.is_empty(){"外部应用".into()}else{name.to_string()}))
 }
 /// 读不到 launch 属性、或格式不对，都当作没有请求。
+/// 通知中心交回的是基类 Notification（没有 XML）；带 XML 的是派生类 ToastNotification，这里按需转换。
 fn notification_focus(n:&UserNotification)->Option<(isize,String)>{
-    let root=n.Notification().ok()?.Content().ok()?.DocumentElement().ok()?;
+    use windows::core::Interface;
+    use windows::UI::Notifications::ToastNotification;
+    let toast:ToastNotification=n.Notification().ok()?.cast().ok()?;
+    let root=toast.Content().ok()?.DocumentElement().ok()?;
     parse_focus(&root.GetAttribute(&HSTRING::from("launch")).ok()?.to_string())
+}
+/// 备选载体：launch 属性读不到时，协议串是绑定里最后一个文字元素，拼接后位于正文末尾；识别后从正文里剔除。
+/// 偏移按匹配串的实际字节长度算：“ · ” 里的「·」在 UTF-8 里占 2 字节。
+pub(crate) fn body_focus(body:&str)->(String,Option<(isize,String)>){
+    const MARK:&str=" · daozai-focus:";
+    match body.rfind(MARK){
+        Some(at)=>{let focus=parse_focus(&body[at+MARK.len()..]);(body[..at].to_string(),focus)}
+        None=>(body.to_string(),None),
+    }
 }
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 pub enum FocusError{Exited,Denied}
@@ -765,8 +778,10 @@ fn connect_inner(ctx:eframe::egui::Context,filter:crate::messenger::Notification
                                 if target.is_none(){crate::messenger::windows::trace(format!("通知 {id}·创建 {created} 未能绑定 {} 账号",client.name()));}
                                 target
                             });
-                        // 非内置客户端的通知可以用 launch 属性请求常驻入口（点击切回它的窗口）。
-                        let focus=if client.is_none(){notification_focus(&n)}else{None};
+                        // 非内置客户端的通知可以请求常驻入口（点击切回它的窗口）：优先读 launch 属性，
+                        // 读不到再看正文末尾的备选标记；备选标记总是从正文里剔除，不会显示出来。
+                        let (body,marker)=if client.is_some(){(body,None)}else{body_focus(&body)};
+                        let focus=if client.is_some(){None}else{notification_focus(&n).or(marker)};
                         if !body.trim().is_empty(){messages.push((created,app,id,body,target,focus));}
                     }
                 }
