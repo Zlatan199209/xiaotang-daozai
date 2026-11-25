@@ -408,8 +408,9 @@ impl App {
         self.enqueue_alert(Alert{source:AlertSource::External(id),title,body,page:usize::MAX,at:self.t,duration:4.5,bluetooth:None,meeting:None,unread},false);
     }
     /// 通知带着目标窗口：在右侧留下常驻入口。同一窗口只留一条，后到的更新名称。
+    /// 先登记来源再做开关检查：新来源由登记这一步默认放行，顺序反了会让第一次到来的来源永远被挡在外面。
     pub fn receive_external_target(&mut self,app:String,id:String,window:isize,name:String){
-        if window==0 || id.is_empty() || !Self::external_allowed(&self.settings,&self.notification_apps,&id) || !self.notification_apps.observe(&id,&app){return;}
+        if window==0 || id.is_empty() || !self.notification_apps.observe(&id,&app) || !Self::external_allowed(&self.settings,&self.notification_apps,&id){return;}
         let name=name.chars().filter(|c|!c.is_control()).take(24).collect::<String>();
         let name=if name.trim().is_empty(){"外部应用".to_string()}else{name.trim().to_string()};
         match self.external_targets.iter_mut().find(|target|target.window==window){

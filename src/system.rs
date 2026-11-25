@@ -605,11 +605,12 @@ fn notification_focus(n:&UserNotification)->Option<(isize,String)>{
     parse_focus(&root.GetAttribute(&HSTRING::from("launch")).ok()?.to_string())
 }
 /// 备选载体：launch 属性读不到时，协议串是绑定里最后一个文字元素，拼接后位于正文末尾；识别后从正文里剔除。
-/// 偏移按匹配串的实际字节长度算：“ · ” 里的「·」在 UTF-8 里占 2 字节。
+/// 截取时要从 `daozai-focus:` 前缀本身开始（解析函数要求带前缀），偏移按字节长度算，不手写数字。
 pub(crate) fn body_focus(body:&str)->(String,Option<(isize,String)>){
+    const PREFIX:&str="daozai-focus:";
     const MARK:&str=" · daozai-focus:";
     match body.rfind(MARK){
-        Some(at)=>{let focus=parse_focus(&body[at+MARK.len()..]);(body[..at].to_string(),focus)}
+        Some(at)=>{let focus=parse_focus(&body[at+MARK.len()-PREFIX.len()..]);(body[..at].to_string(),focus)}
         None=>(body.to_string(),None),
     }
 }
