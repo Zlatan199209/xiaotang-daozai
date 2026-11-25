@@ -1,0 +1,47 @@
+name: 补丁版构建
+
+on:
+  push:
+    branches: ["patch/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: 快速编译检查
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust stable
+        run: rustup toolchain install stable --profile minimal
+      - name: cargo check（含测试目标）
+        run: cargo +stable check --locked --all-targets --features record --target x86_64-pc-windows-msvc
+
+  build:
+    name: 测试并构建
+    needs: check
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust stable
+        run: rustup toolchain install stable --profile minimal
+      - name: 全量测试
+        run: cargo +stable test --locked --all-targets --features record --target x86_64-pc-windows-msvc -- --test-threads=1
+      - name: release 构建
+        shell: pwsh
+        run: |
+          $cargoHome = Join-Path $env:USERPROFILE '.cargo'
+          $flags = @('-C', 'target-feature=+crt-static', "--remap-path-prefix=$cargoHome=cargo", "--remap-path-prefix=$env:GITHUB_WORKSPACE=daozai", '-C', 'link-arg=/PDBALTPATH:%_PDB%')
+          $env:CARGO_ENCODED_RUSTFLAGS = $flags -join [char]0x1f
+          cargo +stable build --locked --release --bin daozai --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw "release build failed" }
+      - name: 上传 daozai.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: daozai-patched
+          path: target/x86_64-pc-windows-msvc/release/daozai.exe
+          if-no-files-found: error
