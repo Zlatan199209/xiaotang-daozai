@@ -14,6 +14,8 @@ mod lyrics_switch;
 mod health_reminder;
 #[path="settings_redesign_ui_tests.rs"]
 mod settings_redesign;
+#[path="external_shortcut_ui_tests.rs"]
+mod external_shortcut;
 use eframe::egui::{self, Pos2, Rect, Vec2};
 use std::sync::Mutex;
 
