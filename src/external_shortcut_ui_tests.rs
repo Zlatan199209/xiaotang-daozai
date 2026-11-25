@@ -9,9 +9,12 @@ fn ready() -> H {
     h.frame(vec![]);
     h
 }
+/// egui 在每帧结束时交换 this_pass / prev_pass，而 `read_response` 先查 this_pass：
+/// 刚跑完一帧时读到的是上一帧的控件。所以状态变化后要连跑两帧再读，和健康角标的测试一个做法。
+fn settle(h:&mut H){h.frame(vec![]);h.frame(vec![]);}
 fn receive(h:&mut H,window:isize,name:&str) {
     h.app.receive_external_target("Windows PowerShell".into(),SOURCE.into(),window,name.into());
-    h.frame(vec![]);
+    settle(h);
 }
 fn entry(h:&H,window:isize) -> Rect {
     h.ctx.read_response(egui::Id::new(("card",true,format!("external-{window}")))).unwrap_or_else(||panic!("缺少窗口 {window} 的常驻入口")).rect
@@ -72,9 +75,9 @@ fn external_entries_clear_after_viewing_or_when_the_window_is_gone(){
     let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());let mut h=ready();
     receive(&mut h,4242,"Claude Code");receive(&mut h,5151,"Claude Code");
     assert!(h.app.viewed_external(4242));assert_eq!(h.app.external_targets.len(),1);
-    h.frame(vec![]);assert!(missing(&h,4242));assert!(!missing(&h,5151));
+    settle(&mut h);assert!(missing(&h,4242));assert!(!missing(&h,5151));
     h.app.retain_external_targets(|window|window!=5151);assert!(h.app.external_targets.is_empty());
-    h.frame(vec![]);assert!(missing(&h,5151));assert_eq!(h.app.unread_count(),0);
+    settle(&mut h);assert!(missing(&h,5151));assert_eq!(h.app.unread_count(),0);
     assert!(!h.app.viewed_external(4242),"没有该窗口的入口时返回 false");
 }
 
