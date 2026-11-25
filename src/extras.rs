@@ -408,7 +408,7 @@ impl App {
         self.enqueue_alert(Alert{source:AlertSource::External(id),title,body,page:usize::MAX,at:self.t,duration:4.5,bluetooth:None,meeting:None,unread},false);
     }
     /// 通知带着目标窗口：在右侧留下常驻入口。同一窗口只留一条，后到的更新名称。
-    pub(crate) fn receive_external_target(&mut self,app:String,id:String,window:isize,name:String){
+    pub fn receive_external_target(&mut self,app:String,id:String,window:isize,name:String){
         if window==0 || id.is_empty() || !Self::external_allowed(&self.settings,&self.notification_apps,&id) || !self.notification_apps.observe(&id,&app){return;}
         let name=name.chars().filter(|c|!c.is_control()).take(24).collect::<String>();
         let name=if name.trim().is_empty(){"外部应用".to_string()}else{name.trim().to_string()};
@@ -426,13 +426,14 @@ impl App {
             && apps.items.iter().any(|(key,_,on)|key==id && *on)
     }
     /// 该窗口来到前台或已切换成功：清掉它的入口。
-    pub(crate) fn viewed_external(&mut self,window:isize)->bool{
+    pub fn viewed_external(&mut self,window:isize)->bool{
         let before=self.external_targets.len();
         self.external_targets.retain(|target|target.window!=window);
         before!=self.external_targets.len()
     }
-    /// 清掉窗口已不存在的入口。
-    pub(crate) fn retain_external_targets(&mut self,mut alive:impl FnMut(isize)->bool){self.external_targets.retain(|target|alive(target.window));}
+    /// 清掉窗口已不存在的入口。（参数必须声明成 `mut`：闭包要可变借用它。）
+    /// 上面三个方法对外壳（`main.rs` 是另一个 crate）开放，所以是 `pub` 而不是 `pub(crate)`。
+    pub fn retain_external_targets(&mut self,mut alive:impl FnMut(isize)->bool){self.external_targets.retain(|target|alive(target.window));}
     pub fn reveal_messenger_notice(&mut self,unread:crate::app::Unread){
         if !unread.source.adapter().dismiss_unread || !self.pending_messengers.contains(&unread){return;}
         let body=if unread.pid==0{"消息账号暂无法确认"}else{"暂时无法打开对应窗口"};
