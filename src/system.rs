@@ -555,7 +555,8 @@ unsafe fn avoidance_for_window(foreground:HWND,island:HWND,pid:u32,settings:&cra
 pub enum Incoming {
     Revoked,
     Status(String),
-    Message(String, String, String, Option<crate::messenger::Target>),
+    /// 末尾的（窗口句柄, 名称）来自通知的 launch 属性（见 parse_focus），没有请求时为 None。
+    Message(String, String, String, Option<crate::messenger::Target>, Option<(isize, String)>),
 }
 #[path="toast_source.rs"]
 mod toast_source;
@@ -584,6 +585,36 @@ fn notification_body(n: &UserNotification) -> Result<String> {
     }
     Ok(parts.join(" · "))
 }
+/// 通知用 launch 属性请求常驻入口：`daozai-focus:<窗口句柄>:<名称>`。
+/// 前缀不符、句柄不是非零整数都当作没有请求；名称去掉控制字符，最多 24 个字符。
+pub(crate) fn parse_focus(launch:&str)->Option<(isize,String)>{
+    let rest=launch.strip_prefix("daozai-focus:")?;
+    let (window,name)=rest.split_once(':')?;
+    let window=window.trim().parse::<isize>().ok().filter(|window|*window!=0)?;
+    let name=name.chars().filter(|c|!c.is_control()).take(24).collect::<String>();
+    let name=name.trim();
+    Some((window,if name.is_empty(){"外部应用".into()}else{name.to_string()}))
+}
+/// 读不到 launch 属性、或格式不对，都当作没有请求。
+fn notification_focus(n:&UserNotification)->Option<(isize,String)>{
+    let root=n.Notification().ok()?.Content().ok()?.DocumentElement().ok()?;
+    parse_focus(&root.GetAttribute(&HSTRING::from("launch")).ok()?.to_string())
+}
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum FocusError{Exited,Denied}
+/// 把通知指向的窗口带到前台：最小化先还原。窗口已不存在与系统拒绝切换分别回报。
+pub fn focus_window(window:isize)->std::result::Result<(),FocusError>{unsafe{
+    let window=HWND(window as *mut _);
+    if !IsWindow(window).as_bool(){return Err(FocusError::Exited);}
+    if IsIconic(window).as_bool(){let _=ShowWindowAsync(window,SW_RESTORE);}
+    if SetForegroundWindow(window).as_bool(){Ok(())}else{Err(FocusError::Denied)}
+}}
+pub fn window_exists(window:isize)->bool{unsafe{IsWindow(HWND(window as *mut _)).as_bool()}}
+/// 当前前台窗口的根窗口；取法与钩子脚本记录目标窗口时一致。
+pub fn foreground_root()->Option<isize>{unsafe{
+    let root=GetAncestor(GetForegroundWindow(),GA_ROOT);
+    (!root.0.is_null()).then_some(root.0 as isize)
+}}
 /// 停止信号独立于消息队列，断开后结束等待，不再读取通知。
 pub struct Notifications {
     incoming: Receiver<Incoming>,
@@ -734,14 +765,16 @@ fn connect_inner(ctx:eframe::egui::Context,filter:crate::messenger::Notification
                                 if target.is_none(){crate::messenger::windows::trace(format!("通知 {id}·创建 {created} 未能绑定 {} 账号",client.name()));}
                                 target
                             });
-                        if !body.trim().is_empty(){messages.push((created,app,id,body,target));}
+                        // 非内置客户端的通知可以用 launch 属性请求常驻入口（点击切回它的窗口）。
+                        let focus=if client.is_none(){notification_focus(&n)}else{None};
+                        if !body.trim().is_empty(){messages.push((created,app,id,body,target,focus));}
                     }
                 }
                 baseline.finish(current,complete);
                 accounts.retain(|client,id,created|baseline.previous.as_ref().and_then(|items|items.get(&id)).is_some_and(|item|item.created==created && item.client==Some(client)));
                 messages.sort_by_key(|item|item.0);
-                for (_,app,id,body,target) in messages {
-                    if !send(Incoming::Message(app,id,body,target)){return Ok(());}
+                for (_,app,id,body,target,focus) in messages {
+                    if !send(Incoming::Message(app,id,body,target,focus)){return Ok(());}
                 }
                 let status=match filter{crate::messenger::NotificationFilter::Only(client)=>format!("仅监听 {} · {channels}",client.name()),crate::messenger::NotificationFilter::All=>format!("正在监听 Windows 通知 · 当前可见 {count} 条\n{channels}")};
                 if status!=last_status {

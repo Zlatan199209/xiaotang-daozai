@@ -131,6 +131,7 @@ impl Shell {
             self.app.discard_unread(unread);
             ctx.request_repaint();
         }
+        if !self.app.external_targets.is_empty(){self.app.retain_external_targets(daozai::system::window_exists);}
         self.unread_at=PollClock::now();
     }
 
@@ -485,8 +486,10 @@ impl eframe::App for Shell {
                 while let Ok(event)=rx.try_recv(){match event {
                     daozai::system::Incoming::Revoked=>{self.app.settings.read_notifications=false;self.app.settings.save();},
                     daozai::system::Incoming::Status(s)=>self.app.listener_status=s,
-                    daozai::system::Incoming::Message(a,id,b,target)=>{
+                    daozai::system::Incoming::Message(a,id,b,target,focus)=>{
                         if target.is_some_and(|target|self.messengers.track(target)==Err(OpenError::Exited)){continue;}
+                        // a 是来源的显示名，id 是来源的应用标识；目标入口两样都要。
+                        if let Some((window,name))=focus{self.app.receive_external_target(a.clone(),id.clone(),window,name);}
                         self.app.receive_notification_from(a,id,b,target.map(|target|target.unread));
                     }
                 }}
@@ -494,7 +497,12 @@ impl eframe::App for Shell {
             if self.app.pending_messengers!=previous_pending || self.unread_at.ready(Duration::from_secs(1)){
                 self.clear_exited_messengers(ctx);
             }
-            if !self.app.pending_messengers.is_empty(){ctx.request_repaint_after(Duration::from_secs(1));}
+            // 外部通知的入口：它的窗口来到前台后清除（与聊天客户端未读“看过即清”一致）。
+            #[cfg(windows)]
+            if foreground_changed && !self.app.external_targets.is_empty() {
+                if let Some(root)=daozai::system::foreground_root(){self.app.viewed_external(root);}
+            }
+            if !self.app.pending_messengers.is_empty() || !self.app.external_targets.is_empty(){ctx.request_repaint_after(Duration::from_secs(1));}
             if foreground_changed || self.app.pending_messengers!=previous_pending {
                 // 在微信 / QQ 里打开了某个账号的窗口：清掉这个账号的未读。
                 let mut sources:Vec<app::Messenger>=self.app.pending_messengers.iter().map(|u|u.source).collect();sources.dedup();
@@ -684,6 +692,17 @@ impl eframe::App for Shell {
                         Ok(Some(rx))=>self.music_volume_rx=Some((source,rx)),
                         _=>self.app.say("音乐应用音量暂不可调，请稍后重试"),
                     }
+                }
+                Cmd::FocusExternal(target)=>{
+                    #[cfg(windows)] {
+                        if !self.app.external_targets.contains(&target){continue;}
+                        match daozai::system::focus_window(target.window){
+                            Ok(())=>{self.app.viewed_external(target.window);ctx.request_repaint();}
+                            Err(daozai::system::FocusError::Exited)=>{self.app.retain_external_targets(|window|window!=target.window);self.app.say(format!("{} 的窗口已关闭",target.name));ctx.request_repaint();}
+                            Err(daozai::system::FocusError::Denied)=>{self.app.say(format!("系统暂时不允许切到 {}，可再点一次",target.name));ctx.request_repaint();}
+                        }
+                    }
+                    #[cfg(not(windows))] let _=target;
                 }
                 Cmd::ViewMessenger(unread)=>{
                     #[cfg(windows)] {

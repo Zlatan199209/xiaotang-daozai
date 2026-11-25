@@ -97,6 +97,7 @@ windows = { version = "0.58", features = [
   "Win32_System_WinRT",
   "Win32_System_WinRT_Composition", "UI_Composition", "UI_Composition_Desktop", "System", "Foundation_Numerics",
   "UI_Notifications_Management",
+  "Data_Xml_Dom",
   "UI_Notifications", "ApplicationModel",
   "Win32_System_Ole", "Win32_UI_Shell_Common", "Networking_Connectivity",
   "Win32_Devices_DeviceAndDriverInstallation",

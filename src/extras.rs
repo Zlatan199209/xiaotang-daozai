@@ -95,6 +95,13 @@ pub(crate) fn notice_badge(c:&Card,x:f32,y:f32,a:&Alert){
     }else{notice_icon(&c.scaled(x,y,0.85),x,y,a);}
 }
 pub(crate) fn messenger_icon(c:&Card,x:f32,y:f32,source:crate::app::Messenger){(source.adapter().paint_icon)(c,x,y);}
+/// 外部通知的常驻入口图标：橙色圆角方块加白色星芒。
+pub(crate) fn external_icon(c:&Card,x:f32,y:f32){
+    c.fill(x-9.5,y-9.5,19.0,19.0,5.5,Color32::from_rgb(217,119,87));
+    for (ax,ay,bx,by) in [(0.0,-6.5,0.0,6.5),(-6.5,0.0,6.5,0.0),(-4.4,-4.4,4.4,4.4),(-4.4,4.4,4.4,-4.4)]{
+        c.seg((x+ax,y+ay),(x+bx,y+by),1.8,theme::WHITE);
+    }
+}
 fn notice_icon(c:&Card,x:f32,y:f32,a:&Alert) {
     if a.source!=AlertSource::Internal{crate::paint::bell(c,x,y,theme::WHITE,0.0);return;}
     match a.title.as_str() {
@@ -400,6 +407,32 @@ impl App {
         }else{"收到新通知 · 内容已隐藏".into()};
         self.enqueue_alert(Alert{source:AlertSource::External(id),title,body,page:usize::MAX,at:self.t,duration:4.5,bluetooth:None,meeting:None,unread},false);
     }
+    /// 通知带着目标窗口：在右侧留下常驻入口。同一窗口只留一条，后到的更新名称。
+    pub(crate) fn receive_external_target(&mut self,app:String,id:String,window:isize,name:String){
+        if window==0 || id.is_empty() || !Self::external_allowed(&self.settings,&self.notification_apps,&id) || !self.notification_apps.observe(&id,&app){return;}
+        let name=name.chars().filter(|c|!c.is_control()).take(24).collect::<String>();
+        let name=if name.trim().is_empty(){"外部应用".to_string()}else{name.trim().to_string()};
+        match self.external_targets.iter_mut().find(|target|target.window==window){
+            Some(target)=>target.name=name,
+            None=>self.external_targets.push(crate::app::ExternalTarget{id,window,name}),
+        }
+    }
+    /// 外部通知的入口是否还有效：系统通知已连接、总开关打开、来源没被“只连接 QQ”过滤，且在应用列表里是启用状态。
+    /// 写成不带 self 的关联函数，是为了在 `retain` 的闭包里只借用 `settings` 和 `notification_apps` 两个字段，
+    /// 不和正在被遍历修改的 `external_targets` 冲突（和上面 `pending_messengers.retain` 的写法同理）。
+    fn external_allowed(settings:&crate::model::Settings,apps:&crate::model::NotificationApps,id:&str)->bool{
+        settings.read_notifications && settings.notifications
+            && crate::messenger::NotificationFilter::for_settings(settings).allows(id)
+            && apps.items.iter().any(|(key,_,on)|key==id && *on)
+    }
+    /// 该窗口来到前台或已切换成功：清掉它的入口。
+    pub(crate) fn viewed_external(&mut self,window:isize)->bool{
+        let before=self.external_targets.len();
+        self.external_targets.retain(|target|target.window!=window);
+        before!=self.external_targets.len()
+    }
+    /// 清掉窗口已不存在的入口。
+    pub(crate) fn retain_external_targets(&mut self,alive:impl FnMut(isize)->bool){self.external_targets.retain(|target|alive(target.window));}
     pub fn reveal_messenger_notice(&mut self,unread:crate::app::Unread){
         if !unread.source.adapter().dismiss_unread || !self.pending_messengers.contains(&unread){return;}
         let body=if unread.pid==0{"消息账号暂无法确认"}else{"暂时无法打开对应窗口"};
@@ -408,6 +441,7 @@ impl App {
         self.notification_bell_at=self.t;self.notification_bell_until=self.t+4.5;
     }
     pub(crate) fn tick_alerts(&mut self) {
+        self.external_targets.retain(|target|Self::external_allowed(&self.settings,&self.notification_apps,&target.id));
         self.pending_messengers.retain(|u|u.source.enabled(&self.settings) && (u.source.adapter().capture!=crate::messenger::Capture::SystemToast
             || self.notification_apps.items.iter().any(|(key,_,on)|key==u.source.adapter().notification_id && *on)));
         let allowed=|a:&Alert|match &a.source {
